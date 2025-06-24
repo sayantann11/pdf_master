@@ -1,1 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Analysis Result</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        pre { background: #f9f9f9; padding: 10px; border: 1px solid #ccc; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+
+    <h2>📄 Full Formatted Transactions</h2>
+    <pre>{{ formatted_text or '' }}</pre>
+
+    <h2>🔍 Filtered Transactions Sent to GPT</h2>
+    <pre>{{ filtered_text or '' }}</pre>
+
+    <h2>🤖 GPT Analysis</h2>
+    <pre>{{ gpt_result or '' }}</pre>
+
+    <br>
+    <a href="{{ url_for('upload_file') }}">Upload Another File</a>
+
+</body>
+</html>
 
