@@ -52,22 +52,30 @@ def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 
     - Skip the month if no transaction on or before the target_day.
     """
     lines = full_text.splitlines()
-
+    
     date_pattern = re.compile(
-        r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})|'
-        r'(\d{1,2}[.]\d{1,2}[.]\d{2,4})|'
-        r'(\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,]?\s+\d{2,4})|'
-        r'(\d{1,2}[-](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-]\d{2,4})|'
-        r'(\d{4}[-/]\d{2}[-/]\d{2})',
-        flags=re.IGNORECASE
-    )
-
+    r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}'                                      # 01/01/2024 or 01-01-2024
+    r'|\d{1,2}[.]\d{1,2}[.]\d{2,4}'                                       # 01.01.2024
+    r'|\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,]?\s+\d{2,4}'  # 01 Jan 2024
+    r'|\d{1,2}[-](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-]\d{2,4}'      # 01-Jan-24
+    r'|\d{4}[-/]\d{2}[-/]\d{2}'                                           # 2024-01-01
+    r'|\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}'  # ✅ NEW: 2 Jan 2025
+    r'|\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}',  # ✅ NEW: 31 Jan 31 Jan 2025
+    flags=re.IGNORECASE
+)
+    
+    
     possible_formats = [
-        "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", 
-        "%d-%m-%y", "%d/%m/%y", "%d.%m.%y",
-        "%d-%b-%Y", "%d %b %Y", "%d %B %Y",
-        "%Y-%m-%d", "%d-%b-%y", "%d %b %y"
-    ]
+    "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", 
+    "%d-%m-%y", "%d/%m/%y", "%d.%m.%y",
+    "%d-%b-%Y", "%d %b %Y", "%d %B %Y", "%d %b, %Y", "%d %B, %Y",  # both with and without comma
+    "%Y-%m-%d", "%d-%b-%y", "%d %b %y",
+    "%d %B %Y", "%d %b %Y",  # 👈 explicitly added again for clarity
+    "%d %b", "%d %B",  # Handles '26 Apr' or '2 May'
+    "%d %b %Y", "%d %B %Y",  # e.g. 2 Jan 2025
+"%d %b %d %b %Y", "%d %B %d %B %Y"  # e.g. 31 Jan 31 Jan 2025 (used in fallback cleanup)
+
+]
 
     date_line_map = []
     for line in lines:
@@ -75,6 +83,9 @@ def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 
         match = date_pattern.search(line)
         if match:
             date_str = match.group(0)
+            # ✅ ADD THIS HERE:
+            if len(date_str.split()) > 3:
+                date_str = " ".join(date_str.split()[-3:])
             for fmt in possible_formats:
                 try:
                     date_obj = datetime.strptime(date_str, fmt)
@@ -86,7 +97,7 @@ def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 
     grouped = defaultdict(list)
     for dt, line in date_line_map:
         grouped[(dt.year, dt.month)].append((dt, line))
-
+    
     selected_lines = []
     for (year, month), entries in sorted(grouped.items())[:max_months]:
         try:
@@ -165,10 +176,12 @@ def upload_file():
 
         # Clean and format
         formatted_text = clean_pdf_text(full_text)
+        
+        print("formatted",formatted_text)
         if formatted_text == 0:
             formatted_text = full_text
         filtered_text = extract_last_transaction_on_or_before_day(formatted_text, target_day=target_day)
-        
+        print("filter",filtered_text)
         
         gpt_result = ""
         if isinstance(filtered_text, list):
@@ -190,20 +203,22 @@ def upload_file():
 Here is the extracted bank statement:
 {filtered_text}
 
-Each line contains a transaction that ends with the **closing balance**.
-This balance is always the **last numeric value in the line**, typically followed by "CR" or "DR" (but not always).
+Each line contains a transaction that ends with a **closing balance**.
+This balance is always the **last numeric value** in the line, and may or may not be followed by "CR" or "DR".
 
-Please follow these rules:
+Rules:
 1. For each line:
-   - Extract the **transaction date** in the format `DD-MM-YYYY`.
-   - Extract the **closing balance**, which is the **last numeric value** in the line (before or followed by 'CR' or 'DR').
-2. Treat each line as the **final selected transaction for a month**.
-3. Format the output as:
-   - Used date: `DD-MM-YYYY`, Closing Balance: ₹amount
-4. After listing all lines, calculate the average of the extracted closing balances and display it as:
-   **average_balance = ₹amount**
+   - Extract the **transaction date** in the format `DD-MM-YYYY`. Use the **first date that appears in the line**, not any IDs or trailing ones.
+   - Extract the **closing balance** as the **last numeric value** in the line, regardless of whether 'CR' or 'DR' appears.
+2. Every line is already the final selected transaction for its month. Process **all lines**.
+3. Output each line in this format:
+   Used date: `DD-MM-YYYY`, Closing Balance: ₹<amount>
+4. After listing all lines, compute and display the average of all extracted closing balances:
+   **average_balance = ₹<average>**
+5. If no valid transactions are found, output exactly:
+   **average_balance = ₹0**
 
-⚠️ Output only as specified. Do not include any summaries, titles, headers, or additional explanations.
+⚠️ Output only the formatted lines and the average. No headings, no explanations, no markdown, no bullet points.
 """
             }
                 ]
@@ -222,6 +237,10 @@ Please follow these rules:
         )
 
     return render_template('upload.html')
+
+
+
+
 
 
 
