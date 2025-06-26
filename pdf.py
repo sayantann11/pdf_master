@@ -43,6 +43,13 @@ def is_transaction_line(line: str) -> bool:
 from datetime import datetime
 import re
 from collections import defaultdict
+from datetime import datetime
+from collections import defaultdict
+import re
+
+from datetime import datetime
+from collections import defaultdict
+import re
 
 def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 5, max_months: int = 6):
     """
@@ -52,30 +59,27 @@ def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 
     - Skip the month if no transaction on or before the target_day.
     """
     lines = full_text.splitlines()
-    
-    date_pattern = re.compile(
-    r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}'                                      # 01/01/2024 or 01-01-2024
-    r'|\d{1,2}[.]\d{1,2}[.]\d{2,4}'                                       # 01.01.2024
-    r'|\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,]?\s+\d{2,4}'  # 01 Jan 2024
-    r'|\d{1,2}[-](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-]\d{2,4}'      # 01-Jan-24
-    r'|\d{4}[-/]\d{2}[-/]\d{2}'                                           # 2024-01-01
-    r'|\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}'  # ✅ NEW: 2 Jan 2025
-    r'|\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}',  # ✅ NEW: 31 Jan 31 Jan 2025
-    flags=re.IGNORECASE
-)
-    
-    
-    possible_formats = [
-    "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", 
-    "%d-%m-%y", "%d/%m/%y", "%d.%m.%y",
-    "%d-%b-%Y", "%d %b %Y", "%d %B %Y", "%d %b, %Y", "%d %B, %Y",  # both with and without comma
-    "%Y-%m-%d", "%d-%b-%y", "%d %b %y",
-    "%d %B %Y", "%d %b %Y",  # 👈 explicitly added again for clarity
-    "%d %b", "%d %B",  # Handles '26 Apr' or '2 May'
-    "%d %b %Y", "%d %B %Y",  # e.g. 2 Jan 2025
-"%d %b %d %b %Y", "%d %B %d %B %Y"  # e.g. 31 Jan 31 Jan 2025 (used in fallback cleanup)
 
-]
+    date_pattern = re.compile(
+        r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}'  # 01/01/2024 or 01-01-2024
+        r'|\d{1,2}[.]\d{1,2}[.]\d{2,4}'  # 01.01.2024
+        r'|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,]?\s+\d{2,4}'  # 01 Jan 2024
+        r'|\d{1,2}[-](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-]\d{2,4}'  # 01-Jan-24
+        r'|\d{4}[-/]\d{2}[-/]\d{2}'  # 2024-01-01
+        r'|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}'  # 2 Jan 2025
+        r'|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}',  # 31 Jan 31 Jan 2025
+        flags=re.IGNORECASE
+    )
+
+    possible_formats = [
+        "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y",
+        "%d-%m-%y", "%d/%m/%y", "%d.%m.%y",
+        "%d-%b-%Y", "%d %b %Y", "%d %B %Y", "%d %b, %Y", "%d %B, %Y",
+        "%Y-%m-%d", "%d-%b-%y", "%d %b %y",
+        "%d %B %Y", "%d %b %Y",
+        "%d %b", "%d %B",
+        "%d %b %Y", "%d %B %Y"
+    ]
 
     date_line_map = []
     for line in lines:
@@ -83,9 +87,9 @@ def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 
         match = date_pattern.search(line)
         if match:
             date_str = match.group(0)
-            # ✅ ADD THIS HERE:
             if len(date_str.split()) > 3:
-                date_str = " ".join(date_str.split()[-3:])
+                parts = date_str.split()
+                date_str = " ".join(parts[-3:])
             for fmt in possible_formats:
                 try:
                     date_obj = datetime.strptime(date_str, fmt)
@@ -97,13 +101,12 @@ def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 
     grouped = defaultdict(list)
     for dt, line in date_line_map:
         grouped[(dt.year, dt.month)].append((dt, line))
-    
+
     selected_lines = []
     for (year, month), entries in sorted(grouped.items())[:max_months]:
         try:
             target = datetime(year, month, target_day)
         except ValueError:
-            # Invalid day for this month (e.g., Feb 30)
             continue
 
         valid_entries = [e for e in entries if e[0] <= target]
@@ -111,10 +114,12 @@ def extract_last_transaction_on_or_before_day(full_text: str, target_day: int = 
             continue
 
         valid_entries.sort(key=lambda x: x[0])
-        last_entry = valid_entries[-1]  # 👉 last transaction on or before target day
+        last_entry = valid_entries[-1]
         selected_lines.append(last_entry[1])
 
     return selected_lines
+
+
 
 
 def clean_pdf_text(full_text: str) -> str:
@@ -237,12 +242,3 @@ Rules:
         )
 
     return render_template('upload.html')
-
-
-
-
-
-
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000,debug=True)
